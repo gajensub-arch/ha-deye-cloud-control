@@ -89,7 +89,7 @@ class DeyeCloudClient:
                     ) as response:
                         response.raise_for_status()
                         result = await response.json()
-                        
+
             _LOGGER.debug("Full API response for %s: %s", endpoint, result)
 
             # Check API response code (0, 1000000, and 1106000 are success codes)
@@ -122,10 +122,10 @@ class DeyeCloudClient:
     async def obtain_token(self) -> str:
         """Obtain access token."""
         _LOGGER.debug("Obtaining new access token")
-        
+
         # Token endpoint: GET with appId as query parameter, credentials in POST body
         url = f"{self.base_url}/account/token?appId={self.app_id}"
-        
+
         request_data = {
             "appSecret": self.app_secret,
             "email": self.email,
@@ -133,7 +133,7 @@ class DeyeCloudClient:
         }
 
         session = await self._get_session()
-        
+
         try:
             async with async_timeout.timeout(API_TIMEOUT):
                 # Use POST (not GET) but with appId in URL
@@ -146,8 +146,8 @@ class DeyeCloudClient:
                     response.raise_for_status()
                     result = await response.json()
 
-            _LOGGER.debug("Token response: code=%s (type=%s), msg=%s, data=%s", 
-                         result.get("code"), type(result.get("code")), 
+            _LOGGER.debug("Token response: code=%s (type=%s), msg=%s, data=%s",
+                         result.get("code"), type(result.get("code")),
                          result.get("msg"), result.get("data"))
 
             # Check for success (Deye uses both 0 and 1000000 as success codes)
@@ -160,15 +160,15 @@ class DeyeCloudClient:
 
             # Token is directly in response as 'accessToken', not in 'data' object
             self._access_token = result.get("accessToken")
-            
+
             if not self._access_token:
                 _LOGGER.error("No access token in response: %s", result)
                 raise DeyeCloudAuthError("Failed to obtain access token - no token in response")
-            
+
             # Token expires after 60 days according to docs
             expires_in = 60 * 24 * 60 * 60  # 60 days in seconds
             self._token_expiry = time.time() + expires_in - 86400  # Refresh 1 day early
-            
+
             _LOGGER.debug("Access token obtained successfully, expires in %d days", expires_in // 86400)
             return self._access_token
 
@@ -201,17 +201,17 @@ class DeyeCloudClient:
         """Get latest data for devices (up to 10 at once)."""
         if len(device_sns) > 10:
             raise ValueError("Maximum 10 devices per request")
-        
+
         # Use "deviceList" not "deviceSnList" - this is what the API expects
         data = {"deviceList": device_sns}
         _LOGGER.debug("Requesting device data with payload: %s", data)
         result = await self._request("POST", "/device/latest", data=data)
         _LOGGER.debug("Device latest data result: %s", result)
-        
+
         # Parse the response - it comes back as deviceDataList
         device_data_list = result.get("deviceDataList", [])
         _LOGGER.debug("Device data list: %s", device_data_list)
-        
+
         # Convert to dict keyed by deviceSn for easier lookup
         parsed_data = {}
         for device_data in device_data_list:
@@ -226,7 +226,7 @@ class DeyeCloudClient:
                     if key:
                         data_dict[key] = value
                 parsed_data[device_sn] = data_dict
-        
+
         _LOGGER.debug("Parsed device data: %s", parsed_data)
         return parsed_data
 
@@ -250,7 +250,7 @@ class DeyeCloudClient:
         time_type: str = "day",
     ) -> Dict[str, Any]:
         """Get device history data.
-        
+
         Args:
             device_sn: Device serial number
             start_time: Start timestamp (10-digit Unix timestamp in seconds)
@@ -282,7 +282,7 @@ class DeyeCloudClient:
         self, device_sn: str, charge_mode: bool, mode_type: str = "GRID_CHARGE"
     ) -> Dict[str, Any]:
         """Enable or disable battery charge mode.
-        
+
         Args:
             device_sn: Device serial number
             charge_mode: True to enable, False to disable
@@ -300,7 +300,7 @@ class DeyeCloudClient:
         self, device_sn: str, work_mode: str
     ) -> Dict[str, Any]:
         """Set system work mode.
-        
+
         Args:
             device_sn: Device serial number
             work_mode: 'SELLING_FIRST', 'ZERO_EXPORT_TO_LOAD', or 'ZERO_EXPORT_TO_CT'
@@ -313,7 +313,7 @@ class DeyeCloudClient:
         self, device_sn: str, energy_pattern: str
     ) -> Dict[str, Any]:
         """Set energy pattern.
-        
+
         Args:
             device_sn: Device serial number
             energy_pattern: 'BATTERY_FIRST' or 'LOAD_FIRST'
@@ -326,7 +326,7 @@ class DeyeCloudClient:
         self, device_sn: str, parameter: str, value: int
     ) -> Dict[str, Any]:
         """Set battery parameter value.
-        
+
         Args:
             device_sn: Device serial number
             parameter: Parameter name (e.g., 'maxChargeCurrent', 'maxDischargeCurrent')
@@ -340,6 +340,36 @@ class DeyeCloudClient:
         result = await self._request("POST", "/order/battery/parameter/update", data=data)
         return result
 
+    async def set_battery_charge_current(
+        self, device_sn: str, current: int
+    ) -> Dict[str, Any]:
+        """Set the maximum battery charge current.
+
+        Args:
+            device_sn: Device serial number
+            current: Max charge current in amps
+        """
+        return await self.set_battery_parameter(
+            device_sn=device_sn,
+            parameter="maxChargeCurrent",
+            value=current,
+        )
+
+    async def set_battery_discharge_current(
+        self, device_sn: str, current: int
+    ) -> Dict[str, Any]:
+        """Set the maximum battery discharge current.
+
+        Args:
+            device_sn: Device serial number
+            current: Max discharge current in amps
+        """
+        return await self.set_battery_parameter(
+            device_sn=device_sn,
+            parameter="maxDischargeCurrent",
+            value=current,
+        )
+
     async def get_tou_config(self, device_sn: str) -> Dict[str, Any]:
         """Get Time of Use configuration."""
         data = {"deviceSn": device_sn}
@@ -350,7 +380,7 @@ class DeyeCloudClient:
         self, device_sn: str, tou_items: list[dict], timeout_seconds: int = 30
     ) -> Dict[str, Any]:
         """Set Time of Use configuration.
-        
+
         Args:
             device_sn: Device serial number
             tou_items: List of TOU setting items
@@ -368,7 +398,7 @@ class DeyeCloudClient:
         self, device_sn: str, enabled: bool
     ) -> Dict[str, Any]:
         """Enable or disable solar sell.
-        
+
         Args:
             device_sn: Device serial number
             enabled: True to enable, False to disable
@@ -384,7 +414,7 @@ class DeyeCloudClient:
         self, device_sn: str, power: int
     ) -> Dict[str, Any]:
         """Set max sell power.
-        
+
         Args:
             device_sn: Device serial number
             power: Max sell power in watts
